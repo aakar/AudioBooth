@@ -73,16 +73,6 @@ struct AudioBoothShortcuts: AppShortcutsProvider {
     )
 
     AppShortcut(
-      intent: SkipToPreviousChapterIntent(),
-      phrases: [
-        "Skip to previous chapter in \(.applicationName)",
-        "Previous chapter in \(.applicationName)",
-      ],
-      shortTitle: "Previous chapter",
-      systemImageName: "backward.end.fill"
-    )
-
-    AppShortcut(
       intent: SetSleepTimerWithDurationIntent(),
       phrases: [
         "Set sleep timer in \(.applicationName)",
@@ -111,6 +101,17 @@ struct AudioBoothShortcuts: AppShortcutsProvider {
       ],
       shortTitle: "Add bookmark",
       systemImageName: "bookmark"
+    )
+
+    AppShortcut(
+      intent: GetCurrentItemIntent(),
+      phrases: [
+        "What's playing in \(.applicationName)",
+        "Get current item in \(.applicationName)",
+        "Get the current book in \(.applicationName)",
+      ],
+      shortTitle: "Current item",
+      systemImageName: "book"
     )
   }
 }

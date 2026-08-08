@@ -1,3 +1,4 @@
+import Models
 import SwiftUI
 
 struct PlayerPreferencesView: View {
@@ -143,6 +144,18 @@ struct PlayerPreferencesView: View {
           )
         }
         .listRowBackground(theme.colors.background.card)
+
+        NavigationLink {
+          HeadphonePreferencesView()
+        } label: {
+          PreferenceRow(
+            systemImage: "headphones",
+            tint: .teal,
+            title: Text("Headphone Controls"),
+            subtitle: headphoneSubtitle
+          )
+        }
+        .listRowBackground(theme.colors.background.card)
       } header: {
         Text("Configure")
       }
@@ -173,6 +186,12 @@ struct PlayerPreferencesView: View {
 
   private var playbackDisplaySubtitle: Text {
     Text(preferences.playerOrientation.displayText)
+  }
+
+  private var headphoneSubtitle: Text {
+    let previous = String(localized: preferences.headphonePreviousAction.displayText)
+    let next = String(localized: preferences.headphoneNextAction.displayText)
+    return Text(verbatim: "\(previous) · \(next)")
   }
 }
 
