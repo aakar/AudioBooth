@@ -27,6 +27,14 @@ struct AddBookmarkIntent: AppIntent {
         throw AppIntentError.noAudiobookPlaying
       }
 
+      // A book can be the "current" player while only loaded (restored at
+      // launch) or paused, in which case `current` is non-nil but nothing is
+      // actually playing. Require active playback so the shortcut doesn't
+      // silently create a bookmark at a stale position.
+      guard currentPlayer.isPlaying else {
+        throw AppIntentError.noAudiobookPlaying
+      }
+
       guard let time = currentPlayer.getCurrentTime() else {
         throw AppIntentError.noAudiobookPlaying
       }
