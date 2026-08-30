@@ -38,6 +38,10 @@ final class AudioPlayer {
   private var timeObserver: Any?
   private var cancellables = Set<AnyCancellable>()
   private var itemObservers = Set<AnyCancellable>()
+  private var wantsPlayback = false
+  private var decodeRetryCount = 0
+  private var decodeRetryTime: TimeInterval?
+  private var pendingSeekTarget: TimeInterval?
 
   let events = PassthroughSubject<Event, Never>()
 
@@ -85,6 +89,9 @@ final class AudioPlayer {
 
   func setQueue(for session: PlaybackSession) {
     let wasPlaying = isPlaying
+    wantsPlayback = wasPlaying
+    pendingSeekTarget = nil
+    resetDecodeRetry()
     self.session = session
     self.tracks = session.tracks.filter { url(for: $0) != nil }
 
@@ -101,6 +108,7 @@ final class AudioPlayer {
   }
 
   func pause() {
+    wantsPlayback = false
     player.pause()
   }
 
@@ -109,6 +117,8 @@ final class AudioPlayer {
       events.send(.error(nil))
       return
     }
+
+    wantsPlayback = true
 
     if isPlaying {
       events.send(.stateChanged(.playing))
@@ -120,12 +130,16 @@ final class AudioPlayer {
       currentTrackIndex = trackIndex
       loadQueue(from: trackIndex, seekTo: offset, autoPlay: true)
     } else {
-      seek(to: mediaProgress.currentTime)
+      if pendingSeekTarget != mediaProgress.currentTime {
+        seek(to: mediaProgress.currentTime)
+      }
       player.play()
     }
   }
 
   func stop() {
+    wantsPlayback = false
+    pendingSeekTarget = nil
     removeTimeObserver()
     player.pause()
     player.removeAllItems()
@@ -134,6 +148,7 @@ final class AudioPlayer {
 
   func seek(to time: TimeInterval) {
     mediaProgress.currentTime = time
+    pendingSeekTarget = time
 
     guard !tracks.isEmpty else {
       player.seek(
@@ -141,6 +156,7 @@ final class AudioPlayer {
         toleranceBefore: .zero,
         toleranceAfter: .zero
       ) { [weak self] _ in
+        self?.pendingSeekTarget = nil
         self?.events.send(.seek(time))
       }
       return
@@ -154,14 +170,19 @@ final class AudioPlayer {
         toleranceBefore: .zero,
         toleranceAfter: .zero
       ) { [weak self] _ in
+        self?.pendingSeekTarget = nil
         self?.events.send(.seek(time))
       }
       return
     }
 
-    guard tracks.indices.contains(targetIndex) else { return }
+    guard tracks.indices.contains(targetIndex) else {
+      pendingSeekTarget = nil
+      return
+    }
 
     loadQueue(from: targetIndex, seekTo: offset, autoPlay: isPlaying)
+    pendingSeekTarget = nil
     events.send(.seek(time))
   }
 
@@ -250,6 +271,56 @@ private extension AudioPlayer {
 }
 
 private extension AudioPlayer {
+  static let maxDecodeRetries = 10
+  static let decodeRetryRewind: TimeInterval = 1
+  static let decodeRetryStableDuration: TimeInterval = 3
+
+  /// Works around Apple's xHE-AAC (USAC) decoder bug FB22340742, where AVPlayer reports
+  /// "Cannot Decode" at certain positions and stays broken until the queue is rebuilt.
+  /// Rebuilding the queue a second earlier usually gets past the bad spot.
+  /// Returns true when the failure was taken over and playback was restarted.
+  func recoverFromDecodeFailure(_ error: Error?) -> Bool {
+    guard let error = error as? NSError,
+      error.domain == AVFoundationErrorDomain,
+      error.code == AVError.Code.decodeFailed.rawValue,
+      !tracks.isEmpty
+    else { return false }
+
+    guard decodeRetryCount < Self.maxDecodeRetries else {
+      AppLogger.player.error("Decode failure persists after \(Self.maxDecodeRetries) retries, giving up")
+      resetDecodeRetry()
+      return false
+    }
+
+    let position = player.currentSeconds > 0 ? time : mediaProgress.currentTime
+    let retryTime = max(0, position - Self.decodeRetryRewind)
+
+    decodeRetryCount += 1
+    decodeRetryTime = retryTime
+
+    AppLogger.player.warning(
+      "Decode failure at \(position), retry \(decodeRetryCount)/\(Self.maxDecodeRetries) from \(retryTime)"
+    )
+
+    let (trackIndex, offset) = trackAndOffset(for: retryTime)
+    loadQueue(from: trackIndex, seekTo: offset, autoPlay: wantsPlayback)
+    mediaProgress.currentTime = retryTime
+
+    return true
+  }
+
+  func resetDecodeRetryIfStable() {
+    guard let decodeRetryTime, time > decodeRetryTime + Self.decodeRetryStableDuration else { return }
+    resetDecodeRetry()
+  }
+
+  func resetDecodeRetry() {
+    decodeRetryCount = 0
+    decodeRetryTime = nil
+  }
+}
+
+private extension AudioPlayer {
   func setupObservers() {
     player.publisher(for: \.timeControlStatus)
       .removeDuplicates()
@@ -297,6 +368,7 @@ private extension AudioPlayer {
           self.events.send(.stateChanged(.ready))
         case .failed:
           AppLogger.player.error("Player item failed: \(item.error?.localizedDescription ?? "Unknown")")
+          guard !self.recoverFromDecodeFailure(item.error) else { return }
           self.player.pause()
           self.player.removeAllItems()
           self.events.send(.error(item.error))
@@ -325,9 +397,11 @@ private extension AudioPlayer {
 
     NotificationCenter.default.publisher(for: AVPlayerItem.failedToPlayToEndTimeNotification, object: item)
       .sink { [weak self] notification in
+        guard let self else { return }
         let error = notification.userInfo?[AVPlayerItemFailedToPlayToEndTimeErrorKey] as? Error
         AppLogger.player.error("Failed to play to end: \(error?.localizedDescription ?? "Unknown")")
-        self?.events.send(.stalled)
+        guard !self.recoverFromDecodeFailure(error) else { return }
+        self.events.send(.stalled)
       }
       .store(in: &itemObservers)
 
@@ -344,6 +418,7 @@ private extension AudioPlayer {
     let interval = CMTime(seconds: 0.5, preferredTimescale: 1000)
     timeObserver = player.addPeriodicTimeObserver(forInterval: interval, queue: .main) { [weak self] _ in
       guard let self, self.player.currentSeconds > 0 else { return }
+      self.resetDecodeRetryIfStable()
       self.events.send(.timeUpdate(self.time))
     }
   }
