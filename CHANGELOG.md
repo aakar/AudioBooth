@@ -8,11 +8,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
-- Headphone controls - New settings page to override the next and previous gestures on your headphones, including an action to add a bookmark at the current position
-- Get current item shortcut - New Siri Shortcut and App Intent that returns the currently playing item with its chapter and playback position
+- Read Along - Follow the ebook while the audiobook plays, with the narrated sentence highlighted and the page turning itself. Transcription happens entirely on device and requires iOS 26
 - Total counts - Show total item counts on the library, authors, series, and collections pages
 - Sleep timer Focus intent - Activate the auto sleep timer using a Focus (thanks @fivezeroes)
 - Sleep timer pause behavior - Configurable sleep timer behavior when playback is paused (thanks @fivezeroes)
+- Headphone controls - New settings page to override the next and previous gestures on your headphones, including an action to add a bookmark at the current position
+- Get current item shortcut - New Siri Shortcut and App Intent that returns the currently playing item with its chapter and playback position
 
 ### Changed
 - Downloads revamp - Full revamp of how downloads are handled, with improved multi-track and background downloads, the ability to resume failed downloads, and better overall stability
