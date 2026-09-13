@@ -42,10 +42,27 @@ struct BookPlayer: View {
         if model.isLocked {
           unlockOverlay
         }
+
+        if let message = model.positionSyncMessage, !model.isLocked {
+          VStack {
+            PositionSyncBanner(
+              message: message,
+              onCatchUp: model.onPositionSyncOfferAccepted,
+              onDismiss: model.onPositionSyncDismissed
+            )
+
+            Spacer()
+          }
+          .transition(.move(edge: .top).combined(with: .opacity))
+        }
       }
       .animation(.easeInOut, value: model.isLocked)
+      .animation(.easeInOut, value: model.positionSyncMessage)
       .orientationLock(supportedOrientations)
-      .onAppear { UIApplication.shared.isIdleTimerDisabled = preferences.keepScreenAwakeInPlayer }
+      .onAppear {
+        UIApplication.shared.isIdleTimerDisabled = preferences.keepScreenAwakeInPlayer
+        model.onAppear()
+      }
       .onDisappear { UIApplication.shared.isIdleTimerDisabled = false }
       .onChange(of: preferences.keepScreenAwakeInPlayer) { _, newValue in
         UIApplication.shared.isIdleTimerDisabled = newValue
@@ -142,6 +159,12 @@ struct BookPlayer: View {
               Label("Queue", systemImage: "list.bullet")
             }
 
+            if model.supportsPageMatch, disabledControls.contains(.pageMatch) {
+              Button(action: { model.onPageMatchTapped() }) {
+                Label(PlayerControl.pageMatch.displayName, systemImage: PlayerControl.pageMatch.systemImage)
+              }
+            }
+
             Divider()
 
             Button(action: { model.isSettingsPresented = true }) {
@@ -203,6 +226,12 @@ struct BookPlayer: View {
     }
     .sheet(isPresented: $model.isQueuePresented) {
       PlayerQueueView(model: PlayerQueueViewModel())
+    }
+    .sheet(item: $model.pageMatch) { pageMatch in
+      PageMatchSheet(model: pageMatch)
+    }
+    .sheet(item: $model.positionSync) { positionSync in
+      PositionSyncSheet(model: positionSync)
     }
     .sheet(isPresented: $model.isSettingsPresented) {
       NavigationStack {
@@ -481,6 +510,23 @@ struct BookPlayer: View {
         }
       }
       .frame(maxWidth: .infinity)
+
+    case .pageMatch:
+      if model.supportsPageMatch {
+        Button(action: {
+          Haptics.impact(.soft)
+          model.onPageMatchTapped()
+        }) {
+          VStack(spacing: 6) {
+            Image(systemName: control.systemImage)
+              .font(.system(size: 20))
+              .frame(width: 20, height: 20)
+            Text(control.displayName)
+              .font(.caption2)
+          }
+        }
+        .frame(maxWidth: .infinity)
+      }
     }
   }
 }
@@ -602,12 +648,17 @@ extension BookPlayer {
     var isSettingsPresented: Bool = false
     var isQueuePresented: Bool = false
     var isLocked: Bool = false
+    var supportsPageMatch: Bool = false
+    var pageMatch: PageMatchSheet.Model?
+    var positionSyncMessage: LocalizedStringResource?
+    var positionSync: PositionSyncSheet.Model?
 
     var secondsFromStartOfBook: TimeInterval { 0 }
 
     func onLockTapped() { isLocked = true }
     func onUnlockTapped() { isLocked = false }
 
+    func onAppear() {}
     func onTogglePlaybackTapped() {}
     func onPauseTapped() {}
     func onPlayTapped() {}
@@ -616,6 +667,10 @@ extension BookPlayer {
     func onDownloadTapped() {}
     func onBookmarksTapped() {}
     func onHistoryTapped() {}
+    func onPageMatchTapped() {}
+    func onPositionSyncTapped() {}
+    func onPositionSyncOfferAccepted() {}
+    func onPositionSyncDismissed(_ scope: PositionSyncOffer.Dismissal) {}
 
     init(
       id: String = UUID().uuidString,

@@ -75,8 +75,17 @@ struct EbookReaderView: View {
         ReadAlongStatusPill(message: message, status: readAlong.status)
           .padding(.top, 8)
           .transition(.move(edge: .top).combined(with: .opacity))
+      } else if let message = model.catchUpMessage {
+        PositionSyncBanner(
+          message: message,
+          onCatchUp: model.onCatchUpTapped,
+          onDismiss: model.onCatchUpDismissed
+        )
+        .padding(.top, 8)
+        .transition(.move(edge: .top).combined(with: .opacity))
       }
     }
+    .animation(.easeInOut(duration: 0.25), value: model.catchUpMessage)
     .animation(.easeInOut(duration: 0.25), value: model.readAlong?.status)
     .overlay {
       if showZoneEditor {
@@ -117,8 +126,14 @@ struct EbookReaderView: View {
         EbookPlayerSheet(player: player)
       }
     }
-    .onAppear(perform: model.onAppear)
-    .onDisappear(perform: model.onDisappear)
+    .onAppear {
+      UIApplication.shared.isIdleTimerDisabled = userPreferences.keepScreenAwakeInPlayer
+      model.onAppear()
+    }
+    .onDisappear {
+      UIApplication.shared.isIdleTimerDisabled = false
+      model.onDisappear()
+    }
     .statusBarHidden(true)
     .preferredColorScheme(preferredColorScheme)
     .background {
@@ -238,10 +253,21 @@ struct EbookReaderView: View {
   }
 
   private var progressLabel: String {
-    if model.preferences.progressDisplay == .page, let page = model.page {
-      return String(localized: "\(page.current) of \(page.total)")
+    if let page = displayedPage {
+      return page.current.formatted()
     }
     return model.progress.formatted(.percent.precision(.fractionLength(0)))
+  }
+
+  private var progressCaption: String {
+    if let page = displayedPage {
+      return String(localized: "of \(page.total)")
+    }
+    return String(localized: "Progress")
+  }
+
+  private var displayedPage: (current: Int, total: Int)? {
+    model.preferences.progressDisplay == .page ? model.page : nil
   }
 
   @ViewBuilder
@@ -265,9 +291,13 @@ struct EbookReaderView: View {
   private func readAlongStatusMessage(_ status: ReadAlongCoordinator.Status) -> String? {
     switch status {
     case let .preparing(fraction):
-      String(localized: "Preparing Read Along… \(Int(fraction * 100))%")
+      model.isCatchingUpToNarration
+        ? String(localized: "Getting ready… \(Int(fraction * 100))%")
+        : String(localized: "Preparing Read Along… \(Int(fraction * 100))%")
     case .locating:
-      String(localized: "Listening for your place in the book…")
+      model.isCatchingUpToNarration
+        ? String(localized: "Finding where the narrator is…")
+        : String(localized: "Listening for your place in the book…")
     case let .failed(message):
       message
     case .off, .following:
@@ -283,6 +313,7 @@ struct EbookReaderView: View {
           VStack(spacing: 6) {
             Image(systemName: "list.bullet")
               .font(.system(size: 20))
+              .frame(height: 20)
             Text("Contents")
               .font(.caption2)
           }
@@ -298,6 +329,7 @@ struct EbookReaderView: View {
           VStack(spacing: 6) {
             Image(systemName: "textformat.size")
               .font(.system(size: 20))
+              .frame(height: 20)
             Text("Settings")
               .font(.caption2)
           }
@@ -310,7 +342,9 @@ struct EbookReaderView: View {
           Text(progressLabel)
             .font(.system(size: 16, weight: .medium))
             .monospacedDigit()
-          Text("Progress")
+            .lineLimit(1)
+            .frame(width: 60, height: 20)
+          Text(progressCaption)
             .font(.caption2)
         }
       }
@@ -335,6 +369,7 @@ struct EbookReaderView: View {
           VStack(spacing: 6) {
             Image(systemName: "playpause.circle")
               .font(.system(size: 20))
+              .frame(height: 20)
             Text("Now Playing")
               .font(.caption2)
           }
@@ -411,6 +446,8 @@ extension EbookReaderView {
 
     var supportsReadAlong: Bool
     var readAlong: ReadAlongCoordinator?
+    var catchUpMessage: LocalizedStringResource?
+    var isCatchingUpToNarration: Bool = false
 
     func onAppear() {}
     func onDisappear() {}
@@ -424,6 +461,8 @@ extension EbookReaderView {
     func onAutoScrollPlayPauseTapped() {}
     func onShowControlsChanged(_ isVisible: Bool) {}
     func onReadAlongTapped() {}
+    func onCatchUpTapped() {}
+    func onCatchUpDismissed(_ scope: PositionSyncOffer.Dismissal) {}
 
     init(
       isLoading: Bool = true,

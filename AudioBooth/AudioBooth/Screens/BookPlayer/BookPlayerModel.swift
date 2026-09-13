@@ -37,6 +37,11 @@ final class BookPlayerModel: BookPlayer.Model {
   private var maxRecoveryAttempts = 3
   private var isRecovering = false
   private var interruptionBeganAt: Date?
+  private var positionedAt: Date?
+  private var positionSyncCheck: Task<Void, Never>?
+  private var positionSyncShownAt: TimeInterval?
+
+  private static let secondsOfListeningBeforeDismissing: TimeInterval = 30
   private var volumeObservation: NSKeyValueObservation?
   private var hasPlayedThisSession = false
   private var hasRecordedCompletion = false
@@ -78,6 +83,8 @@ final class BookPlayerModel: BookPlayer.Model {
     )
 
     setupDownloadStateBinding(bookID: book.id)
+    setupPageMatch()
+    refreshPositionSyncOffer()
     setupHistory()
 
     onLoad()
@@ -120,6 +127,8 @@ final class BookPlayerModel: BookPlayer.Model {
     )
 
     setupDownloadStateBinding(bookID: item.bookID)
+    setupPageMatch()
+    refreshPositionSyncOffer()
     setupHistory()
 
     onLoad()
@@ -230,6 +239,11 @@ final class BookPlayerModel: BookPlayer.Model {
     setupHistory()
 
     onLoad()
+  }
+
+  isolated deinit {
+    itemObservation?.cancel()
+    positionSyncCheck?.cancel()
   }
 
   override var secondsFromStartOfBook: TimeInterval {
@@ -351,6 +365,175 @@ final class BookPlayerModel: BookPlayer.Model {
     return Int(ceil(player.time))
   }
 
+  override func onPageMatchTapped() {
+    guard let localBook = try? LocalBook.fetch(bookID: id) else {
+      Toast(error: String(localized: "This audiobook isn't available on this device yet.")).show()
+      return
+    }
+
+    let model = PageMatchViewModel(context: BookSyncContext(localBook: localBook))
+    model.onFinished = { [weak self] in
+      self?.pageMatch = nil
+    }
+    pageMatch = model
+  }
+
+  private func setupPageMatch() {
+    guard #available(iOS 26.0, *), PageScannerView.isSupported else { return }
+    supportsPageMatch = true
+  }
+
+  override func onPositionSyncOfferAccepted() {
+    onPositionSyncTapped()
+  }
+
+  override func onPositionSyncTapped() {
+    positionSyncMessage = nil
+    positionSyncShownAt = nil
+
+    guard let localBook = try? LocalBook.fetch(bookID: id) else {
+      Toast(error: String(localized: "This audiobook isn't available on this device yet.")).show()
+      return
+    }
+
+    let model = PositionSyncViewModel(context: BookSyncContext(localBook: localBook))
+    model.onFinished = { [weak self] in
+      self?.positionSync = nil
+    }
+    positionSync = model
+  }
+
+  override func onPositionSyncDismissed(_ scope: PositionSyncOffer.Dismissal) {
+    positionSyncMessage = nil
+    positionSyncShownAt = nil
+    positionSyncCheck?.cancel()
+
+    guard let ebookProgress = mediaProgress.ebookProgress else { return }
+    PositionSyncOffer.dismiss(.toAudiobook, bookID: id, at: ebookProgress, scope: scope)
+  }
+
+  override func onAppear() {
+    refreshPositionSyncOffer()
+  }
+
+  private func refreshPositionSyncOffer() {
+    guard #available(iOS 26.0, *) else { return }
+
+    guard positionSyncMessage == nil, positionSyncCheck == nil else { return }
+
+    guard playerManager.reader?.readAlong?.status.isActive != true else {
+      AppLogger.readAlong.info("Catch Up: Read Along is running, leaving the narration session alone")
+      return
+    }
+
+    guard let context = pendingPositionSyncOffer() else { return }
+
+    positionSyncCheck = Task { [weak self] in
+      defer { self?.positionSyncCheck = nil }
+      await self?.verifyPositionSyncOffer(context)
+    }
+  }
+
+  private func dismissPositionSyncIfListeningOn(at time: TimeInterval) {
+    guard positionSyncMessage != nil, let shown = positionSyncShownAt else { return }
+    guard time - shown >= Self.secondsOfListeningBeforeDismissing else { return }
+
+    positionSyncMessage = nil
+    positionSyncShownAt = nil
+
+    guard let ebookProgress = mediaProgress.ebookProgress else { return }
+    PositionSyncOffer.dismiss(.toAudiobook, bookID: id, at: ebookProgress)
+    AppLogger.readAlong.info("Catch Up: dismissed, you kept listening from here")
+  }
+
+  private func pendingPositionSyncOffer() -> BookSyncContext? {
+    guard UserPreferences.shared.positionSyncOffers else { return nil }
+
+    guard let ebookProgress = mediaProgress.ebookProgress else {
+      AppLogger.readAlong.info("Catch Up: no ebook progress recorded for \(self.id)")
+      return nil
+    }
+
+    let ebook: String = String(format: "%.4f", ebookProgress)
+    let audio: String = String(format: "%.4f", mediaProgress.progress)
+    let written: String = "\(mediaProgress.lastUpdate)"
+    AppLogger.readAlong.info(
+      "Catch Up: ebook \(ebook), audio \(audio) at \(Int(self.mediaProgress.currentTime))s, written \(written)"
+    )
+
+    guard
+      PositionSyncOffer.needsCheck(
+        .toAudiobook,
+        bookID: id,
+        audioTime: mediaProgress.currentTime,
+        ebookProgress: ebookProgress
+      )
+    else {
+      AppLogger.readAlong.info("Catch Up: neither position has moved since the last check")
+      return nil
+    }
+
+    if let dismissal = PositionSyncOffer.dismissal(
+      .toAudiobook,
+      bookID: id,
+      at: ebookProgress,
+      duration: mediaProgress.duration
+    ) {
+      AppLogger.readAlong.info(
+        "Catch Up: suppressed, already synced or dismissed for scope '\(dismissal.rawValue)'"
+      )
+      return nil
+    }
+
+    guard let localBook = try? LocalBook.fetch(bookID: id) else { return nil }
+    let context = BookSyncContext(localBook: localBook)
+
+    guard context.hasEbook else {
+      AppLogger.readAlong.info("Catch Up: the ebook is not downloaded")
+      return nil
+    }
+
+    guard context.isDownloaded else {
+      AppLogger.readAlong.info("Catch Up: the audiobook is not fully downloaded")
+      return nil
+    }
+
+    return context
+  }
+
+  @available(iOS 26.0, *)
+  private func verifyPositionSyncOffer(_ context: BookSyncContext) async {
+    let alignment = await PositionSyncCheck.measure(
+      context: context,
+      audioTime: mediaProgress.currentTime
+    )
+    guard !Task.isCancelled else { return }
+
+    if let ebookProgress = mediaProgress.ebookProgress {
+      PositionSyncOffer.recordCheck(
+        .toAudiobook,
+        bookID: id,
+        audioTime: mediaProgress.currentTime,
+        ebookProgress: ebookProgress
+      )
+    }
+
+    guard let alignment else {
+      AppLogger.readAlong.info("Catch Up: the narration could not be placed in the ebook")
+      return
+    }
+
+    guard alignment.isEbookAhead else {
+      AppLogger.readAlong.info("Catch Up: the audiobook is already where you stopped reading")
+      return
+    }
+
+    let ahead: String = Duration.seconds(alignment.seconds(over: context.duration))
+      .formatted(.units(allowed: [.hours, .minutes], width: .wide))
+    positionSyncMessage = "You've read about \(ahead) further than you've listened."
+    positionSyncShownAt = mediaProgress.currentTime
+  }
+
   override func onHistoryTapped() {
     history?.isPresented = true
   }
@@ -386,11 +569,14 @@ extension BookPlayerModel {
   func seekToTime(_ time: TimeInterval) {
     guard let player else {
       pendingSeekTime = time
+      positionedAt = Date()
+      moveProgress(to: time)
       AppLogger.player.debug("Player not ready, storing pending seek to \(time)s")
       return
     }
 
-    mediaProgress.currentTime = time
+    positionedAt = Date()
+    moveProgress(to: time)
 
     player.seek(to: time)
     AppLogger.player.debug("Seeked to position: \(time)s")
@@ -398,6 +584,13 @@ extension BookPlayerModel {
       model.updateProgress()
     }
     PlaybackHistory.record(itemID: id, action: .seek, position: time)
+  }
+
+  func moveProgress(to time: TimeInterval) {
+    mediaProgress.currentTime = time
+
+    guard mediaProgress.duration > 0, mediaProgress.duration.isFinite else { return }
+    mediaProgress.progress = time / mediaProgress.duration
   }
 
   func stopPlayer() {
@@ -430,7 +623,7 @@ extension BookPlayerModel {
     )
 
     if let pendingSeekTime {
-      mediaProgress.currentTime = pendingSeekTime
+      moveProgress(to: pendingSeekTime)
       self.pendingSeekTime = nil
       AppLogger.player.info("Using pending seek time: \(pendingSeekTime)s")
     }
@@ -479,6 +672,7 @@ extension BookPlayerModel {
   }
 
   private static let smartRewindCeiling: TimeInterval = 3600
+  private static let deliberateSeekGrace: TimeInterval = 5
 
   private func smartRewindInterval(for reason: SmartRewindReason) -> TimeInterval {
     let prefs = UserPreferences.shared
@@ -501,6 +695,12 @@ extension BookPlayerModel {
   }
 
   private func applySmartRewind(reason: SmartRewindReason) {
+    if let positionedAt, Date().timeIntervalSince(positionedAt) < Self.deliberateSeekGrace {
+      self.positionedAt = nil
+      AppLogger.player.debug("Smart rewind not applied - the position was chosen deliberately")
+      return
+    }
+
     guard !mediaProgress.isFinished else {
       AppLogger.player.debug("Smart rewind not applied - book is completed")
       return
@@ -534,7 +734,7 @@ extension BookPlayerModel {
       return
     }
 
-    mediaProgress.currentTime = newTime
+    moveProgress(to: newTime)
     mediaProgress.lastPlayedAt = Date()
 
     player?.seek(to: newTime)
@@ -927,6 +1127,7 @@ extension BookPlayerModel {
       lastSyncedTime = globalTime
       self.updateMediaProgress()
       self.checkAutoDownloadAfterListening()
+      self.dismissPositionSyncIfListeningOn(at: globalTime)
 
       if UserPreferences.shared.lockScreenShowRemainingInTitle {
         self.nowPlaying.update()
