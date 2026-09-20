@@ -143,7 +143,7 @@ final class PodcastEpisodeContextMenuModel: PodcastEpisodeContextMenu.Model {
     Task {
       do {
         try MediaProgress.markAsFinished(for: episodeID)
-        try await Audiobookshelf.shared.libraries.markAsFinished(bookID: episodeProgressID)
+        try await Audiobookshelf.shared.progress.markAsFinished(bookID: episodeProgressID)
         actions.remove(.markAsFinished)
         actions.insert(.resetProgress)
         onProgressChanged?()
@@ -154,7 +154,11 @@ final class PodcastEpisodeContextMenuModel: PodcastEpisodeContextMenu.Model {
   }
 
   override func onAddToPlaylistTapped() {
-    showingPlaylistSheet = true
+    collectionSelector = CollectionSelectorSheetModel(
+      bookID: podcastID,
+      episodeID: episodeID,
+      mode: .playlists
+    )
   }
 
   override func onResetProgressTapped() {
@@ -166,12 +170,12 @@ final class PodcastEpisodeContextMenuModel: PodcastEpisodeContextMenu.Model {
         if let progress, let id = progress.id {
           progressID = id
         } else {
-          let apiProgress = try await Audiobookshelf.shared.libraries.fetchMediaProgress(
+          let apiProgress = try await Audiobookshelf.shared.progress.fetch(
             bookID: episodeProgressID
           )
           progressID = apiProgress.id
         }
-        try await Audiobookshelf.shared.libraries.resetBookProgress(progressID: progressID)
+        try await Audiobookshelf.shared.progress.reset(progressID: progressID)
         if let progress {
           try progress.delete()
         }

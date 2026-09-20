@@ -114,9 +114,7 @@ final class OfflineListViewModel: OfflineListView.Model {
       return items[index].id
     }
 
-    Task {
-      await deleteItems(Set(idsToDelete))
-    }
+    deleteItems(Set(idsToDelete))
   }
 
   override func onSearchChanged() {
@@ -333,21 +331,29 @@ extension OfflineListViewModel {
 extension OfflineListViewModel {
   private func deleteSelected() async {
     isPerformingBatchAction = true
-    await deleteItems(selectedIDs)
+    deleteItems(selectedIDs)
     selectedIDs.removeAll()
     editMode = .inactive
     isPerformingBatchAction = false
   }
 
-  private func deleteItems(_ ids: Set<String>) async {
-    for id in ids {
-      if let book = allBooks.first(where: { $0.bookID == id }) {
-        book.removeDownload()
-      } else if let episode = allEpisodes.first(where: { $0.episodeID == id }),
-        let podcastID = episode.podcast?.podcastID
-      {
-        downloadManager.deleteEpisodeDownload(episodeID: episode.episodeID, podcastID: podcastID)
-      }
+  private func deleteItems(_ ids: Set<String>) {
+    let books = allBooks.filter { ids.contains($0.bookID) }
+    let episodes = allEpisodes.filter { ids.contains($0.episodeID) }
+
+    allBooks.removeAll { ids.contains($0.bookID) }
+    filteredBooks.removeAll { ids.contains($0.bookID) }
+    allEpisodes.removeAll { ids.contains($0.episodeID) }
+    filteredEpisodes.removeAll { ids.contains($0.episodeID) }
+    updateDisplayedItems()
+
+    for book in books {
+      book.removeDownload()
+    }
+
+    for episode in episodes {
+      guard let podcastID = episode.podcast?.podcastID else { continue }
+      downloadManager.deleteEpisodeDownload(episodeID: episode.episodeID, podcastID: podcastID)
     }
   }
 
@@ -367,7 +373,7 @@ extension OfflineListViewModel {
           let podcastID = episode.podcast?.podcastID ?? ""
           let episodeProgressID = "\(podcastID)/\(episode.episodeID)"
           try MediaProgress.markAsFinished(for: episode.episodeID)
-          try await audiobookshelf.libraries.markAsFinished(bookID: episodeProgressID)
+          try await audiobookshelf.progress.markAsFinished(bookID: episodeProgressID)
         } catch {
           AppLogger.viewModel.error("Failed to mark episode \(id) as finished: \(error)")
         }
@@ -400,13 +406,13 @@ extension OfflineListViewModel {
           if let progress, let progressIDValue = progress.id {
             progressID = progressIDValue
           } else {
-            let apiProgress = try await audiobookshelf.libraries.fetchMediaProgress(
+            let apiProgress = try await audiobookshelf.progress.fetch(
               bookID: episodeProgressID
             )
             progressID = apiProgress.id
           }
 
-          try await audiobookshelf.libraries.resetBookProgress(progressID: progressID)
+          try await audiobookshelf.progress.reset(progressID: progressID)
 
           if let progress {
             try progress.delete()

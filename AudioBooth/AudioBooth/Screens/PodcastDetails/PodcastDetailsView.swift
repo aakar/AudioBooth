@@ -14,7 +14,6 @@ struct PodcastDetailsView: View {
 
   @State private var isDescriptionExpanded = false
   @State private var isShowingFullScreenCover = false
-  @State private var activePlaylistModel: CollectionSelectorSheet.Model?
 
   private enum CoordinateSpaces {
     case scrollView
@@ -51,16 +50,6 @@ struct PodcastDetailsView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(theme.colors.background.page)
-      }
-    }
-    .sheet(
-      isPresented: Binding(
-        get: { activePlaylistModel != nil },
-        set: { if !$0 { activePlaylistModel = nil } }
-      )
-    ) {
-      if let sheetModel = activePlaylistModel {
-        CollectionSelectorSheet(model: sheetModel)
       }
     }
     .toolbar {
@@ -533,6 +522,8 @@ struct PodcastDetailsView: View {
 
       LazyVStack(spacing: 0) {
         ForEach(model.filteredEpisodes) { episode in
+          let selector = episode.contextMenu?.collectionSelector
+
           NavigationLink {
             PodcastEpisodeDetailView(
               model: PodcastEpisodeDetailViewModel(
@@ -558,14 +549,13 @@ struct PodcastDetailsView: View {
             episodeID: episode.id,
             menu: episode.contextMenu
           )
-          .onChange(of: episode.contextMenu?.showingPlaylistSheet) { _, showing in
-            guard showing == true else { return }
-            episode.contextMenu?.showingPlaylistSheet = false
-            activePlaylistModel = CollectionSelectorSheetModel(
-              bookID: model.podcastID,
-              episodeID: episode.id,
-              mode: .playlists
+          .sheet(
+            item: Binding(
+              get: { selector },
+              set: { episode.contextMenu?.collectionSelector = $0 }
             )
+          ) { sheetModel in
+            CollectionSelectorSheet(model: sheetModel)
           }
           .background(
             episode.id == model.highlightedEpisodeID
@@ -914,7 +904,7 @@ extension PodcastDetailsView.Model {
   enum EpisodeFilter: String, CaseIterable {
     case all, incomplete, complete, inProgress
 
-    var title: String {
+    var title: LocalizedStringResource {
       switch self {
       case .all: "All"
       case .incomplete: "Incomplete"
@@ -927,7 +917,7 @@ extension PodcastDetailsView.Model {
   enum EpisodeSort: String, CaseIterable {
     case pubDate, title, season, episode
 
-    var title: String {
+    var title: LocalizedStringResource {
       switch self {
       case .pubDate: "Pub Date"
       case .title: "Title"
