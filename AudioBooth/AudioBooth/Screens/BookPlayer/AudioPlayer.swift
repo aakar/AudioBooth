@@ -101,6 +101,8 @@ final class AudioPlayer {
       return
     }
 
+    AppLogger.player.info("Playing from \(self.isUsingRemoteURLs ? "remote" : "local") files")
+
     addTimeObserver()
 
     let (trackIndex, offset) = trackAndOffset(for: mediaProgress.currentTime)
@@ -126,8 +128,12 @@ final class AudioPlayer {
 
     resumeTask?.cancel()
     resumeTask = Task {
-      await AudioSession.activate()
-      guard !Task.isCancelled, wantsPlayback else { return }
+      let activated = await AudioSession.activate()
+
+      guard !Task.isCancelled, wantsPlayback else {
+        events.send(.stateChanged(isPlaying ? .playing : .paused))
+        return
+      }
 
       if isPlaying {
         events.send(.stateChanged(.playing))
@@ -140,6 +146,10 @@ final class AudioPlayer {
           seek(to: mediaProgress.currentTime)
         }
         player.play()
+
+        if !activated {
+          events.send(.stateChanged(isPlaying ? .playing : .paused))
+        }
       }
     }
   }
@@ -686,11 +696,10 @@ extension LevelingStrength {
 
 extension AVPlayerItem {
   convenience init(url: URL, headers: [String: String]?) {
+    var options: [String: Any] = [AVURLAssetPreferPreciseDurationAndTimingKey: true]
     if !url.isFileURL, let headers, !headers.isEmpty {
-      let asset = AVURLAsset(url: url, options: ["AVURLAssetHTTPHeaderFieldsKey": headers])
-      self.init(asset: asset)
-    } else {
-      self.init(asset: AVURLAsset(url: url))
+      options["AVURLAssetHTTPHeaderFieldsKey"] = headers
     }
+    self.init(asset: AVURLAsset(url: url, options: options))
   }
 }
