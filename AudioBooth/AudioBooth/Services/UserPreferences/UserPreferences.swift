@@ -104,6 +104,9 @@ final class UserPreferences: ObservableObject {
   @AppStorage("hideChapterSkipButtons")
   var hideChapterSkipButtons: Bool = false
 
+  @AppStorage("coverColorProgressBar")
+  var coverColorProgressBar: Bool = true
+
   @AppStorage("keepScreenAwakeInPlayer")
   var keepScreenAwakeInPlayer: Bool = false
 

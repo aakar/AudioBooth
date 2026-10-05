@@ -6,7 +6,6 @@ import SwiftUI
 
 struct PodcastDetailsView: View {
   @Environment(\.appTheme) var theme
-  @Environment(\.verticalSizeClass) private var verticalSizeClass
 
   private let audiobookshelf = Audiobookshelf.shared
 
@@ -14,20 +13,31 @@ struct PodcastDetailsView: View {
 
   @State private var isDescriptionExpanded = false
   @State private var isShowingFullScreenCover = false
+  @State private var layoutSize: CGSize?
 
   private enum CoordinateSpaces {
     case scrollView
   }
 
   var body: some View {
-    Group {
-      if verticalSizeClass == .compact {
-        landscapeLayout
+    GeometryReader { proxy in
+      let size = layoutSize ?? proxy.size
+      if size.width > size.height {
+        landscapeLayout(coverWidth: proxy.leadingPanelWidth ?? 300)
       } else {
         portraitLayout
       }
     }
-    .background(theme.colors.background.page)
+    .background {
+      GeometryReader { proxy in
+        Color.clear
+          .onChange(of: proxy.size, initial: true) { _, size in
+            layoutSize = size
+          }
+      }
+      .ignoresSafeArea(.keyboard)
+    }
+    .background(theme.colors.background.page.ignoresSafeArea())
     .fullScreenCover(isPresented: $isShowingFullScreenCover) {
       if let coverURL = model.coverURL {
         FullScreenCoverView(coverURL: coverURL)
@@ -37,7 +47,7 @@ struct PodcastDetailsView: View {
       if model.isLoading {
         ProgressView("Loading podcast details...")
           .frame(maxWidth: .infinity, maxHeight: .infinity)
-          .background(theme.colors.background.page)
+          .background(theme.colors.background.page.ignoresSafeArea())
       } else if let error = model.error {
         ContentUnavailableView {
           Label("Unable to Load Podcast", systemImage: "exclamationmark.triangle")
@@ -49,7 +59,7 @@ struct PodcastDetailsView: View {
           }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(theme.colors.background.page)
+        .background(theme.colors.background.page.ignoresSafeArea())
       }
     }
     .toolbar {
@@ -179,7 +189,7 @@ struct PodcastDetailsView: View {
 
             contentSections
               .padding(.vertical)
-              .background(theme.colors.background.page)
+              .background(theme.colors.background.page.ignoresSafeArea())
           }
           .padding(.vertical)
         }
@@ -192,17 +202,16 @@ struct PodcastDetailsView: View {
     }
   }
 
-  private var landscapeLayout: some View {
+  private func landscapeLayout(coverWidth: CGFloat) -> some View {
     HStack(spacing: 0) {
-      simpleCover
-        .frame(width: 300)
+      simpleCover(width: coverWidth)
 
       ScrollViewReader { scrollProxy in
         ScrollView {
           contentSections
             .padding(.vertical)
         }
-        .background(theme.colors.background.page)
+        .background(theme.colors.background.page.ignoresSafeArea())
         .onChange(of: model.scrollToEpisodeID) { _, id in
           scrollToEpisode(id: id, proxy: scrollProxy)
         }
@@ -333,7 +342,7 @@ struct PodcastDetailsView: View {
     }
   }
 
-  private var simpleCover: some View {
+  private func simpleCover(width: CGFloat) -> some View {
     VStack {
       Cover(
         model: Cover.Model(
@@ -343,7 +352,7 @@ struct PodcastDetailsView: View {
         ),
         style: .plain
       )
-      .frame(width: 200, height: 200)
+      .frame(width: width * 2 / 3, height: width * 2 / 3)
       .shadow(radius: 4)
       .padding()
       .onTapGesture {
@@ -351,6 +360,7 @@ struct PodcastDetailsView: View {
         isShowingFullScreenCover = true
       }
     }
+    .frame(width: width)
     .frame(maxHeight: .infinity)
     .background {
       LazyImage(url: model.coverURL) { state in
@@ -597,6 +607,14 @@ struct PodcastDetailsView: View {
           Text(publishedAt.formatted(date: .abbreviated, time: .omitted))
             .font(.caption)
             .foregroundStyle(.secondary)
+        }
+
+        if let summary = episode.summary, !summary.isEmpty {
+          Text(summary)
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .lineLimit(2)
+            .multilineTextAlignment(.leading)
         }
 
         HStack(spacing: 8) {
@@ -854,6 +872,7 @@ extension PodcastDetailsView.Model {
     let duration: Double?
     let size: Int64?
     let description: String?
+    var summary: String? = nil
     var isCompleted: Bool
     var progress: Double
     let chapters: [Chapter]

@@ -9,7 +9,6 @@ struct BookPlayer: View {
 
   @Environment(\.dismiss) private var dismiss
 
-  @Environment(\.verticalSizeClass) private var verticalSizeClass
   @ObservedObject private var playerManager = PlayerManager.shared
   @ObservedObject private var preferences = UserPreferences.shared
 
@@ -31,12 +30,15 @@ struct BookPlayer: View {
           .accessibilityHidden(true)
           .ignoresSafeArea()
 
-        Group {
-          if verticalSizeClass == .compact {
-            landscapeLayout
-          } else {
-            portraitLayout
+        GeometryReader { proxy in
+          Group {
+            if proxy.size.width > proxy.size.height {
+              landscapeLayout(artworkWidth: proxy.leadingPanelWidth.map { $0 - 24 })
+            } else {
+              portraitLayout(artworkHeight: proxy.topPanelHeight)
+            }
           }
+          .frame(width: proxy.size.width, height: proxy.size.height)
         }
 
         if model.isLocked {
@@ -274,10 +276,11 @@ struct BookPlayer: View {
     }
   }
 
-  private var portraitLayout: some View {
+  private func portraitLayout(artworkHeight: CGFloat?) -> some View {
     VStack(spacing: 0) {
       VStack(spacing: 0) {
         Artwork(model: model)
+          .frame(height: artworkHeight)
 
         Spacer(minLength: 24)
 
@@ -297,11 +300,11 @@ struct BookPlayer: View {
     }
   }
 
-  private var landscapeLayout: some View {
+  private func landscapeLayout(artworkWidth: CGFloat?) -> some View {
     HStack(spacing: 24) {
       Artwork(model: model)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
-        .containerRelativeFrame(.horizontal) { width, _ in width * 0.4 }
+        .containerRelativeFrame(.horizontal) { width, _ in artworkWidth ?? width * 0.4 }
 
       VStack(spacing: 24) {
         Spacer()
@@ -542,7 +545,7 @@ extension BookPlayer {
           : NavigationDestination.book(id: model.id)
       ) {
         Cover(url: model.coverURL, style: .plain)
-          .frame(minWidth: 200, maxWidth: 400, minHeight: 200, maxHeight: 400)
+          .frame(minWidth: 200, maxWidth: 600, minHeight: 200, maxHeight: 600)
           .aspectRatio(1, contentMode: .fit)
           .shadow(color: .black.opacity(0.5), radius: 20, x: 0, y: 10)
       }
@@ -643,6 +646,7 @@ extension BookPlayer {
 
     var downloadState: DownloadManager.DownloadState
     var backgroundColor: Color = .black
+    var progressTint: Color?
 
     var isPresented: Bool = true
     var isSettingsPresented: Bool = false

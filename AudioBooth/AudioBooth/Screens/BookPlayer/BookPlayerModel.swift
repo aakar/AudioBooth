@@ -36,6 +36,7 @@ final class BookPlayerModel: BookPlayer.Model {
   private var recoveryAttempts = 0
   private var maxRecoveryAttempts = 3
   private var isRecovering = false
+  private var recoveredPosition: TimeInterval = 0
   private var interruption: (beganAt: Date, wasRouteDisconnect: Bool)?
   private var positionedAt: Date?
   private var positionSyncCheck: Task<Void, Never>?
@@ -298,7 +299,10 @@ final class BookPlayerModel: BookPlayer.Model {
 
           if isPlayerUsingRemoteURL() {
             AppLogger.player.info("Player using remote URLs, reloading with new session")
+            pendingPlay = false
             reloadPlayer()
+            isLoading = false
+            resumePlayback()
           } else {
             AppLogger.player.info("Player using local files, no reload needed")
             isLoading = false
@@ -669,6 +673,7 @@ extension BookPlayerModel {
 
   private static let smartRewindCeiling: TimeInterval = 3600
   private static let deliberateSeekGrace: TimeInterval = 5
+  private static let sessionStartMinimumPause: TimeInterval = 60
 
   private func smartRewindInterval(for reason: SmartRewindReason) -> TimeInterval {
     let prefs = UserPreferences.shared
@@ -686,6 +691,8 @@ extension BookPlayerModel {
     case .onInterruption:
       return prefs.smartRewindOnInterruptionInterval
     case .sessionStart:
+      let pause = Date().timeIntervalSince(mediaProgress.lastPlayedAt)
+      guard pause >= Swift.min(prefs.smartRewindAfterPauseThreshold, Self.sessionStartMinimumPause) else { return 0 }
       return prefs.smartRewindMaxInterval
     }
   }
@@ -781,8 +788,10 @@ extension BookPlayerModel {
       guard let image = try? await ImagePipeline.shared.image(for: request),
         let uiColor = image.averageColor
       else { return }
+      let vibrantColor = image.vibrantColor(contrasting: uiColor)
       withAnimation(.easeIn(duration: 0.5)) {
         self.backgroundColor = Color(uiColor)
+        self.progressTint = vibrantColor.map(Color.init)
       }
     }
   }
@@ -1055,12 +1064,12 @@ extension BookPlayerModel {
           self.handleStreamFailure(error: error)
 
         case .finished:
-          player.pause()
           self.isLoading = false
           if self.mediaProgress.duration > 0 {
             self.mediaProgress.currentTime = self.mediaProgress.duration
           }
           self.recordBookCompletionIfNeeded(autoPlayNext: true)
+          player.pause()
 
         case .seek, .rateChanged:
           break
@@ -1082,7 +1091,7 @@ extension BookPlayerModel {
       .store(in: &cancellables)
 
     NotificationCenter.default.publisher(for: AVAudioSession.mediaServicesWereResetNotification)
-      .receive(on: DispatchQueue.main)
+      .debounce(for: .milliseconds(500), scheduler: DispatchQueue.main)
       .sink { [weak self] _ in
         self?.handleMediaServicesReset()
       }
@@ -1102,7 +1111,7 @@ extension BookPlayerModel {
   }
 
   private func onTimeChanged(_ globalTime: TimeInterval) {
-    if recoveryAttempts > 0, !isRecovering {
+    if recoveryAttempts > 0, !isRecovering, globalTime - recoveredPosition > 60 {
       recoveryAttempts = 0
     }
 
@@ -1524,6 +1533,7 @@ extension BookPlayerModel {
         AppLogger.player.debug("Session recreated for downloaded book (for progress sync)")
       }
 
+      recoveredPosition = mediaProgress.currentTime
       isLoading = false
       isRecovering = false
     } catch {
