@@ -69,6 +69,8 @@ final class PlayerManager: ObservableObject, Sendable {
         let currentServerID = Audiobookshelf.shared.libraries.current?.serverID
         if serverID != currentServerID {
           serverID = currentServerID
+          sharedDefaults?.removeObject(forKey: "recentBooks")
+          sharedDefaults?.removeObject(forKey: "listeningStats")
           clearCurrent()
           clearQueue()
         }
@@ -483,6 +485,8 @@ extension PlayerManager {
     commandCenter.pauseCommand.addTarget { [weak self] _ in
       guard let self, let current else { return .commandFailed }
 
+      if current.timer.extendIfNeeded() { return .success }
+
       current.onPauseTapped()
 
       return .success
@@ -491,6 +495,8 @@ extension PlayerManager {
     commandCenter.togglePlayPauseCommand.isEnabled = true
     commandCenter.togglePlayPauseCommand.addTarget { [weak self] _ in
       guard let self, let current else { return .commandFailed }
+
+      if current.timer.extendIfNeeded() { return .success }
 
       current.onTogglePlaybackTapped()
 

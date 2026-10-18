@@ -164,6 +164,12 @@ final class UserPreferences: ObservableObject {
   @AppStorage("librarySortAscending")
   var librarySortAscending: Bool = true
 
+  @AppStorage("bookmarkSortBy")
+  var bookmarkSortBy: BookmarkViewerSheet.Model.SortBy = .time
+
+  @AppStorage("bookmarkSortAscending")
+  var bookmarkSortAscending: Bool = true
+
   @AppStorage("libraryFilter")
   var libraryFilter: FilterPicker.Model.Filter = .all
 
@@ -250,6 +256,9 @@ final class UserPreferences: ObservableObject {
 
   @AppStorage("openPlayerOnLaunch")
   var openPlayerOnLaunch: Bool = false
+
+  @AppStorage("assistedPlayer")
+  var assistedPlayer: Bool = false
 
   @AppStorage("hapticsEnabled")
   var hapticsEnabled: Bool = true
@@ -585,7 +594,7 @@ struct EqualizerSettings: Equatable, RawRepresentable {
   init(
     isEnabled: Bool = false,
     preamp: Float = 0,
-    bandGains: [Float] = [Float](repeating: 0, count: 6)
+    bandGains: [Float] = [Float](repeating: 0, count: 7)
   ) {
     self.isEnabled = isEnabled
     self.preamp = preamp
@@ -597,8 +606,10 @@ struct EqualizerSettings: Equatable, RawRepresentable {
     guard parts.count == 3 else { return nil }
     self.isEnabled = parts[0] == "1"
     self.preamp = Float(parts[1]) ?? 0
-    self.bandGains = parts[2].components(separatedBy: ",").compactMap { Float($0) }
-    guard bandGains.count == 6 else { return nil }
+    var gains = parts[2].components(separatedBy: ",").compactMap { Float($0) }
+    if gains.count == 6 { gains.insert(0, at: 5) }
+    guard gains.count == 7 else { return nil }
+    self.bandGains = gains
   }
 
   var rawValue: String {
@@ -608,7 +619,7 @@ struct EqualizerSettings: Equatable, RawRepresentable {
   }
 }
 
-enum LevelingStrength: Int, CaseIterable, Identifiable {
+enum LevelingStrength: Int, CaseIterable, Identifiable, Codable {
   case off
   case low
   case medium

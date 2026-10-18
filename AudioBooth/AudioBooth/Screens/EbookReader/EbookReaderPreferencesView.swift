@@ -59,6 +59,8 @@ struct EbookReaderPreferencesView: View {
               }
             }
           }
+          Toggle("Progress Header", isOn: $preferences.showProgressHeader)
+
           Toggle("Tap to Navigate", isOn: $preferences.tapToNavigate)
 
           Toggle("Volume to Navigate", isOn: $preferences.useVolumeButtonsForPageTurn)
@@ -95,6 +97,7 @@ struct EbookReaderPreferencesView: View {
         Section {
           Toggle("Follow the Narrator", isOn: $preferences.readAlongFollowsNarration)
           Toggle("Highlight Each Word", isOn: $preferences.readAlongHighlightsWord)
+          Toggle("Highlight Sentence", isOn: $preferences.readAlongHighlightsSentence)
         } header: {
           Text("Read Along")
         } footer: {

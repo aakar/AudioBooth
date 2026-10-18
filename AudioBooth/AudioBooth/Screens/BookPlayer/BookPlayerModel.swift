@@ -46,11 +46,13 @@ final class BookPlayerModel: BookPlayer.Model {
   private var volumeObservation: NSKeyValueObservation?
   private var hasPlayedThisSession = false
   private var hasRecordedCompletion = false
+  private var narrationProgressSync: NarrationProgressSync?
 
   init(_ book: Book) {
     self.item = nil
     do {
-      self.mediaProgress = try MediaProgress.getOrCreate(for: book.id, duration: book.duration)
+      let duration = book.duration > 0 ? book.duration : (try? LocalBook.fetch(bookID: book.id))?.duration ?? 0
+      self.mediaProgress = try MediaProgress.getOrCreate(for: book.id, duration: duration)
     } catch {
       fatalError("Failed to create MediaProgress for book \(book.id): \(error)")
     }
@@ -149,7 +151,7 @@ final class BookPlayerModel: BookPlayer.Model {
       id: episode.episodeID,
       title: episode.title,
       author: episode.podcast?.author,
-      coverURL: episode.coverURL,
+      coverURL: episode.coverURL(raw: true),
       current: mediaProgress.currentTime,
       duration: mediaProgress.duration
     )
@@ -158,7 +160,7 @@ final class BookPlayerModel: BookPlayer.Model {
       id: episode.episodeID,
       title: episode.title,
       author: episode.podcast?.author,
-      coverURL: episode.coverURL
+      coverURL: episode.coverURL()
     )
 
     super.init(
@@ -266,14 +268,7 @@ final class BookPlayerModel: BookPlayer.Model {
   }
 
   override func onPlayTapped() {
-    if userPreferences.shakeSensitivity.isEnabled,
-      let timer = timer as? TimerPickerSheetViewModel,
-      let completedAlert = timer.completedAlert,
-      !completedAlert.isExpired
-    {
-      completedAlert.onExtendTapped()
-      return
-    }
+    if timer.extendIfNeeded() { return }
 
     guard let player, !isLoading else {
       pendingPlay = true
@@ -448,8 +443,19 @@ final class BookPlayerModel: BookPlayer.Model {
     AppLogger.readAlong.info("Catch Up: dismissed, you kept listening from here")
   }
 
+  private func updateNarrationProgress() {
+    if narrationProgressSync == nil, let localBook = item as? LocalBook {
+      narrationProgressSync = NarrationProgressSync(book: localBook, mediaProgress: mediaProgress)
+    }
+    narrationProgressSync?.update()
+  }
+
   private func pendingPositionSyncOffer() -> BookSyncContext? {
-    guard UserPreferences.shared.positionSyncOffers else { return nil }
+    guard UserPreferences.shared.positionSyncOffers,
+      (try? LocalBook.fetch(bookID: id))?.hasImportedNarration != true
+    else {
+      return nil
+    }
 
     guard let ebookProgress = mediaProgress.ebookProgress else {
       AppLogger.readAlong.info("Catch Up: no ebook progress recorded for \(self.id)")
@@ -1321,6 +1327,7 @@ extension BookPlayerModel {
         if mediaProgress.duration > 0 {
           mediaProgress.progress = mediaProgress.currentTime / mediaProgress.duration
         }
+        updateNarrationProgress()
         try mediaProgress.save()
 
         syncSessionProgress()
