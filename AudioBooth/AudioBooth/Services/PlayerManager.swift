@@ -471,11 +471,6 @@ extension PlayerManager {
     commandCenter.playCommand.addTarget { [weak self] _ in
       guard let self, let current else { return .commandFailed }
 
-      if AVAudioSession.sharedInstance().outputVolume == 0 {
-        AppLogger.player.info("Play command received with volume at 0, raising system volume")
-        MPVolumeView.setSystemVolume(0.3)
-      }
-
       current.onPlayTapped()
 
       return .success
@@ -665,8 +660,8 @@ extension PlayerManager {
     playItem(first, autoPlay: true)
   }
 
-  func playNext(autoPlay: Bool = true) {
-    if !queue.isEmpty, userPreferences.autoPlayNextInQueue {
+  func playNext(autoPlay: Bool = true, isManual: Bool = false) {
+    if !queue.isEmpty, isManual || userPreferences.autoPlayNextInQueue {
       let nextItem = queue.removeFirst()
       playItem(nextItem, autoPlay: autoPlay)
       return

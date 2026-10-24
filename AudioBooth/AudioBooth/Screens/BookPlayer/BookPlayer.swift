@@ -82,12 +82,11 @@ struct BookPlayer: View {
           .tint(.primary)
         }
 
-        ToolbarItem(placement: .topBarTrailing) {
-          HStack(spacing: 0) {
-            AirPlayButton()
-              .frame(width: 36, height: 36)
-              .tint(.primary)
-          }
+        if #available(iOS 27.1, *) {
+          airPlayToolbarItem
+            .axisBehavior(.verticalPreferred)
+        } else {
+          airPlayToolbarItem
         }
 
         if #available(iOS 26.0, *) {
@@ -248,32 +247,25 @@ struct BookPlayer: View {
     }
   }
 
-  @ViewBuilder
-  private var playerBackground: some View {
-    let color = model.backgroundColor
-    let dark = Color(white: 0.1)
-    if #available(iOS 18.0, *) {
-      MeshGradient(
-        width: 3,
-        height: 3,
-        points: [
-          [0, 0], [0.5, 0], [1, 0],
-          [0, 0.5], [0.5, 0.5], [1, 0.5],
-          [0, 1], [0.5, 1], [1, 1],
-        ],
-        colors: [
-          color, color.opacity(0.8), dark,
-          color.opacity(0.6), color.opacity(0.4), dark,
-          dark, dark, dark,
-        ]
-      )
-    } else {
-      LinearGradient(
-        colors: [color, dark],
-        startPoint: .top,
-        endPoint: .bottom
-      )
+  private var airPlayToolbarItem: some ToolbarContent {
+    ToolbarItem(placement: .topBarTrailing) {
+      HStack(spacing: 0) {
+        AirPlayButton()
+          .frame(width: 36, height: 36)
+          .tint(.primary)
+      }
     }
+  }
+
+  private var playerBackground: some View {
+    model.backgroundColor
+      .overlay {
+        LinearGradient(
+          colors: [.clear, .black.opacity(0.3)],
+          startPoint: .top,
+          endPoint: .bottom
+        )
+      }
   }
 
   private func portraitLayout(artworkHeight: CGFloat?) -> some View {
